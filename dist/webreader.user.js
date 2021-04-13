@@ -4,7 +4,7 @@
 // @version      0.1.7
 // @description  Reminder to not clock in
 // @author       b-fuze
-// @match        https://selfservice.hprod.onehcm.usg.edu/psp/*
+// @match        https://selfservice.hprod.onehcm.usg.edu/psc/*
 // @run-at       document-start
 // @grant        none
 // ==/UserScript==
@@ -9077,13 +9077,6 @@
     </style>
 
     <main>
-      ${isNoClock.pipe(bool => bool
-            ? xml `
-          <div class="reminder-screen">
-            <h1>You're not supposed to be clocking in!</h1>
-          </div>
-        `
-            : xml ``)}
         <div class="control">
           <button on:click="${() => (isNoClock.value = toggleWeek())}">
             ${isNoClock.pipe(bool => bool ? "Disable" : "Enable")} reminder for this week
@@ -9098,8 +9091,116 @@
     }
     register(ReminderUi);
 
+    const isNoClock$1 = reactive(false);
+    class OverlayUi extends DestinyElement {
+        constructor() {
+            super(...arguments);
+            this.template = xml `
+    <style>
+      main {
+        position: fixed;
+        z-index: 10000;
+        left: 0;
+        top: 0;
+        width: 100vw;
+        height: 100vh;
+
+        visibility: hidden;
+        pointer-events: none;
+
+        font-family: Ubuntu, Arial, sans-serif;
+      }
+
+      main > * {
+        visibility: visible;
+        pointer-events: auto;
+      }
+
+      div.reminder-screen {
+        position: absolute;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+
+        left: 0;
+        top: 0;
+        bottom: 0;
+        right: 0;
+
+        color: #fff;
+        background: rgba(0, 0, 0, 0.75);
+      }
+
+      h1 {
+        font-size: 20px;
+        text-align: center;
+      }
+    </style>
+
+    <main>
+      ${isNoClock$1.pipe(bool => bool
+            ? xml `
+          <div class="reminder-screen">
+            <h1>You're not supposed to be clocking in!</h1>
+          </div>
+        `
+            : xml ``)}
+    </main>
+  `;
+        }
+    }
+    register(OverlayUi);
+
+    const hostname = "*";
+    function iframe(onChange) {
+        addEventListener("message", (evt) => {
+            const { orgAzuga } = evt.data ?? {};
+            if (orgAzuga) {
+                onChange(orgAzuga.isNoClock);
+            }
+        });
+        // Register with parent frame
+        let registerMsg = {
+            orgAzuga: { register: true },
+        };
+        parent.postMessage(registerMsg, hostname);
+    }
+    function newChangeMessage(isNoClock) {
+        return {
+            orgAzuga: { isNoClock },
+        };
+    }
+    function parentFrame(setChildFrame, isNoClockInitial) {
+        let childWindow;
+        addEventListener("message", (evt) => {
+            const { orgAzuga } = evt.data ?? {};
+            if (orgAzuga?.register) {
+                childWindow = setChildFrame().contentWindow;
+                childWindow?.postMessage(newChangeMessage(isNoClockInitial), hostname);
+            }
+        });
+        return (isNoClock) => {
+            childWindow?.postMessage(newChangeMessage(isNoClock), hostname);
+        };
+    }
+
     addEventListener("DOMContentLoaded", () => {
-        document.body.appendChild(document.createElement("reminder-ui"));
+        const isTimePunchFrame = !!document.getElementById("TL_RPT_TIME_FLU");
+        const isDashboard = !!document.getElementById("PT_FLDASHBOARD");
+        if (isTimePunchFrame) {
+            document.body.appendChild(document.createElement("overlay-ui"));
+            iframe((isNoClock) => {
+                isNoClock$1.set(isNoClock);
+            });
+        }
+        if (isDashboard) {
+            document.body.appendChild(document.createElement("reminder-ui"));
+            const updateChild = parentFrame(() => document.querySelector('iframe[title="Report Time"]'), isNoClock.value);
+            // Update child frame when stuff change
+            isNoClock.bind((isNoClock) => {
+                updateChild(isNoClock);
+            });
+        }
     });
 
 }());

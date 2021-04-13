@@ -4,7 +4,7 @@
 // @version      0.1.7
 // @description  Reminder to not clock in
 // @author       b-fuze
-// @match        https://selfservice.hprod.onehcm.usg.edu/psp/*
+// @match        https://selfservice.hprod.onehcm.usg.edu/psc/*
 // @run-at       document-start
 // @grant        none
 // ==/UserScript==

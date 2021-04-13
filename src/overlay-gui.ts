@@ -1,8 +1,7 @@
 import { DestinyElement, xml, register, reactive } from "../destiny/src/mod";
-import { toggleWeek, isNoClockInWeek } from "./utils";
 
-export const isNoClock = reactive(isNoClockInWeek());
-export class ReminderUi extends DestinyElement {
+export const isNoClock = reactive(false);
+export class OverlayUi extends DestinyElement {
   template = xml`
     <style>
       main {
@@ -39,33 +38,9 @@ export class ReminderUi extends DestinyElement {
         background: rgba(0, 0, 0, 0.75);
       }
 
-      div.control {
-        --distance: 30px;
-
-        position: absolute;
-        left: var(--distance);
-        bottom: var(--distance);
-        padding: 20px;
-
-        border-radius: 4px;
-        background: #222;
-        color: #ddd;
-      }
-
-      div.control button {
-        border-radius: 0px;
-        border: 0px;
-
-        padding: 10px 13px;
-      }
-
-      p {
+      h1 {
+        font-size: 20px;
         text-align: center;
-        margin-bottom: 0;
-        margin-top: 10px;
-
-        font-size: 11px;
-        opacity: 0.5;
       }
     </style>
 
@@ -77,17 +52,9 @@ export class ReminderUi extends DestinyElement {
           </div>
         `
         : xml`` ) }
-        <div class="control">
-          <button on:click="${() => (isNoClock.value = toggleWeek())}">
-            ${ isNoClock.pipe(bool => bool ? "Disable" : "Enable") } reminder for this week
-          </button>
-          <p style="text-align: center;">
-            <em>Don't you dare screw up this time</em>
-          </p>
-        </div>
     </main>
   `;
 }
 
-register(ReminderUi);
+register(OverlayUi);
 
