@@ -9170,12 +9170,13 @@
             orgAzuga: { isNoClock },
         };
     }
-    function parentFrame(setChildFrame, isNoClockInitial) {
+    function parentFrame(onChildRegistered) {
         let childWindow;
         addEventListener("message", (evt) => {
             const { orgAzuga } = evt.data ?? {};
             if (orgAzuga?.register) {
-                childWindow = setChildFrame().contentWindow;
+                const { frame, isNoClockInitial } = onChildRegistered();
+                childWindow = frame.contentWindow;
                 childWindow?.postMessage(newChangeMessage(isNoClockInitial), hostname);
             }
         });
@@ -9195,7 +9196,10 @@
         }
         if (isDashboard) {
             document.body.appendChild(document.createElement("reminder-ui"));
-            const updateChild = parentFrame(() => document.querySelector('iframe[title="Report Time"]'), isNoClock.value);
+            const updateChild = parentFrame(() => ({
+                frame: document.querySelector('iframe[title="Report Time"]'),
+                isNoClockInitial: isNoClock.value,
+            }));
             // Update child frame when stuff change
             isNoClock.bind((isNoClock) => {
                 updateChild(isNoClock);

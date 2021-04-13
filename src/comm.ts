@@ -37,15 +37,15 @@ function newChangeMessage(isNoClock: boolean): ChangeMessage {
 }
 
 export function parentFrame(
-  setChildFrame: () => HTMLIFrameElement,
-  isNoClockInitial: boolean,
+  onChildRegistered: () => { frame: HTMLIFrameElement, isNoClockInitial: boolean, },
 ) {
   let childWindow: Window | undefined;
   addEventListener("message", (evt) => {
     const { orgAzuga }: RegisterMessage = evt.data ?? {};
 
     if (orgAzuga?.register) {
-      childWindow = setChildFrame().contentWindow!;
+      const { frame, isNoClockInitial } = onChildRegistered();
+      childWindow = frame.contentWindow!;
       childWindow?.postMessage(newChangeMessage(isNoClockInitial), hostname);
     }
   });

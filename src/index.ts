@@ -19,10 +19,10 @@ addEventListener("DOMContentLoaded", () => {
 
   if (isDashboard) {
     document.body.appendChild(document.createElement("reminder-ui"));
-    const updateChild = parentFrame(
-      () => document.querySelector('iframe[title="Report Time"]') as HTMLIFrameElement,
-      parentIsNoClock.value
-    );
+    const updateChild = parentFrame(() => ({
+      frame: document.querySelector('iframe[title="Report Time"]') as HTMLIFrameElement,
+      isNoClockInitial: parentIsNoClock.value,
+    }));
 
     // Update child frame when stuff change
     parentIsNoClock.bind((isNoClock) => {
