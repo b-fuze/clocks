@@ -1,7 +1,8 @@
-import { DestinyElement, xml, register, reactive } from "../destiny/src/mod";
+import { Component, xml, register, reactive, computed } from "../destiny/src/mod";
 
 export const isNoClock = reactive(false);
-export class OverlayUi extends DestinyElement {
+export const inChildFrame = reactive(true);
+export class OverlayUi extends Component {
   template = xml`
     <style>
       main {
@@ -39,15 +40,18 @@ export class OverlayUi extends DestinyElement {
       }
 
       h1 {
-        font-size: 20px;
         text-align: center;
+      }
+
+      div.reminder-screen.small-text h1 {
+        font-size: 20px;
       }
     </style>
 
     <main>
       ${ isNoClock.pipe(bool => bool
         ? xml`
-          <div class="reminder-screen">
+          <div class="${ computed(() => "reminder-screen " + (inChildFrame.value ? "small-text" : "") ) }">
             <h1>You're not supposed to be clocking in!</h1>
           </div>
         `

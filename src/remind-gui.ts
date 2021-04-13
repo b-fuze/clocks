@@ -1,8 +1,8 @@
-import { DestinyElement, xml, register, reactive } from "../destiny/src/mod";
+import { Component, xml, register, reactive } from "../destiny/src/mod";
 import { toggleWeek, isNoClockInWeek } from "./utils";
 
 export const isNoClock = reactive(isNoClockInWeek());
-export class ReminderUi extends DestinyElement {
+export class ReminderUi extends Component {
   template = xml`
     <style>
       main {

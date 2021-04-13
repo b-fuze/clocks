@@ -1,5 +1,5 @@
 import { ReminderUi, isNoClock as parentIsNoClock } from "./remind-gui";
-import { OverlayUi, isNoClock as iframeIsNoClock } from "./overlay-gui";
+import { OverlayUi, isNoClock as iframeIsNoClock, inChildFrame } from "./overlay-gui";
 import { iframe, parentFrame } from "./comm";
 
 addEventListener("DOMContentLoaded", () => {
@@ -8,16 +8,17 @@ addEventListener("DOMContentLoaded", () => {
   void OverlayUi;
 
   const isTimePunchFrame = !!document.getElementById("TL_RPT_TIME_FLU");
-  const isDashboard = !!document.getElementById("PT_FLDASHBOARD");
+  const isDashboardOrPunchPage = !!(document.getElementById("PT_FLDASHBOARD") ?? document.querySelector('form#TL_RPT_TIME_FLU[name="win0"]'));
 
   if (isTimePunchFrame) {
     document.body.appendChild(document.createElement("overlay-ui"));
-    iframe((isNoClock) => {
+    iframe((isNoClock, isInChildFrame) => {
       iframeIsNoClock.set(isNoClock);
+      inChildFrame.set(isInChildFrame);
     });
   }
 
-  if (isDashboard) {
+  if (isDashboardOrPunchPage) {
     document.body.appendChild(document.createElement("reminder-ui"));
     const updateChild = parentFrame(() => ({
       frame: document.querySelector('iframe[title="Report Time"]') as HTMLIFrameElement,

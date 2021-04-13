@@ -170,15 +170,11 @@
     }
 
     /**
-     * `prop:<PropertyName>` takes in any property and assigns it to
-     * the element in JS.
+     * `prop:<PropertyName>` takes in any property and assigns it to the element in JS.
      *
-     * Note that property names need to use kebab-case because HTML
-     * is case-insensitive. The library will automatically convert
-     * properties to camelCase. For example, to assign a Date object
-     * to a date input (`input.valueAsDate = new Date`), you can do:
+     * For example, to assign a Date object to a date input (`input.valueAsDate = new Date`), you can do:
      * ```html
-     * <inpyt type=date prop:value-as-date=${new Date}>
+     * <input type=date prop:valueAsDate=${new Date} />
      * ```
      */
     function prop(props, element) {
@@ -193,11 +189,6 @@
      * `call:<ElementMethod>` takes an array of arguments to be passed to
      * the method being called, or a single argument to be called with.
      *
-     * Note that method names need to use kebab-case instead of camelCase
-     * because HTML is case-insensitive. The library automatically converts
-     * kebab-cased function names into camelCase. For example, to call
-     * "requestSubmit", call "request-submit".
-     *
      * Note that like all namespaced attributes, input is not optional and
      * must be slotted with `${}` for performance reasons. To call something
      * without arguments, pass in an empty array.
@@ -205,7 +196,7 @@
      * Example usage:
      *
      * ```html
-     * <form call:request-submit=${[]}></form>
+     * <form call:requestSubmit=${[]}></form>
      * ```
      *
      * @param argument.element element the attribute is on
@@ -276,7 +267,7 @@
     /**
      * A class for creating new custom elements in Destiny UI.
      */
-    class DestinyElement extends HTMLElement {
+    class Component extends HTMLElement {
         constructor() {
             super();
             this.assignedData = {
@@ -287,7 +278,7 @@
                 attribute: new Map(),
             };
             this.template = xml `<slot />`;
-            if (new.target === DestinyElement) {
+            if (new.target === Component) {
                 throw new TypeError("Can't initialize abstract class.");
             }
             const shadow = this.attachShadow({ mode: "open" });
@@ -328,7 +319,7 @@
             return this.tagName;
         }
     }
-    DestinyElement.captureProps = false;
+    Component.captureProps = false;
 
     /**
      * Makes sequential numbers appear random.
@@ -356,7 +347,7 @@
     const pseudoRandomId = pseudoRandomIdGenerator();
     const registeredComponents = new Map();
     /**
-     * Registers a DestinyElement component constructor as a Custom Element using its constructor name.
+     * Registers a Component constructor as a Custom Element using its constructor name.
      * @param componentConstructor A constructor for the element to be registered
      * @param noHash               Opt out of adding a unique hash to the name
      */
@@ -401,9 +392,26 @@
         }
     }
 
-    // type TUnwrapAll<T> = {
-    //   [K in keyof T]: TUnwrap<T[K]>
-    // };
+    const computeFunction = {
+        current: undefined,
+    };
+    /**
+     * Takes a callback and returns a new readonly `ReactivePrimitive` whose value is updated with the return value of the callback whenever any of the reactive values used in the callback are updated.
+     *
+     * @param callback The function that computes the value
+     */
+    function computed(callback) {
+        computeFunction.current = fn;
+        const reactor = new ReactivePrimitive(callback());
+        computeFunction.current = undefined;
+        function fn() {
+            computeFunction.current = fn;
+            reactor.value = callback();
+            computeFunction.current = undefined;
+        }
+        return reactor;
+    }
+
     /**
      * `ReactivePrimitive`s are reactive values that contain a single value which can be updated and whose updates can be listened to.
      */
@@ -432,21 +440,27 @@
         [Symbol.toPrimitive]() {
             return this.value;
         }
+        /**
+         * When the object is attempted to be serialized using JSON.serialize(), the current value of `this.value` is returned.
+         */
+        toJSON() {
+            return this.value;
+        }
         get [Symbol.toStringTag]() {
-            return `Destiny<${typeof this.#value}>`;
+            return `ReactivePrimitive<${typeof this.#value}>`;
         }
         /**
          * Instances of this class can be iterated over asynchronously; it will iterate over updates to the `value`. You can use this feature using `for-await-of`.
          */
         async *[Symbol.asyncIterator]() {
             while (true) {
-                yield await this._nextUpdate();
+                yield await this.#nextUpdate();
             }
         }
         /**
          * Returns a Promise which will resolve the next time the `value` is updated.
          */
-        _nextUpdate() {
+        #nextUpdate() {
             return new Promise(resolve => {
                 const cb = (v) => {
                     resolve(v);
@@ -462,7 +476,7 @@
         bind(callback, noFirstCall = false) {
             this.#callbacks.add(callback);
             if (!noFirstCall)
-                callback(this.#value);
+                callback(this.value);
             return this;
         }
         /**
@@ -491,28 +505,17 @@
             this.set(value);
         }
         get value() {
+            if (computeFunction.current) {
+                this.#callbacks.add(computeFunction.current);
+            }
             return this.#value;
-        }
-        /**
-         * Creates a new `ReactivePrimitive` from a callback and n other ReactivePrimitive(s) and/or ReactiveArray(s).
-         * @param updater A callback function that is called when any of the reactive input items are updated. The return value of this function determines the value of the returned `ReactivePrimitive`.
-         * @param refs One or more `ReactivePrimitive`s or `ReactiveArray`s which are to be piped into a new one.
-         */
-        static from(updater, ...refs) {
-            const currentValue = () => updater(...refs.map(
-            // This is fine. The type is not known and isn't a concern at this step.
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-            v => v.value));
-            const newRef = new ReactivePrimitive(currentValue());
-            refs.forEach(ref => ref.bind(() => queueMicrotask(() => newRef.value = currentValue()), true));
-            return newRef;
         }
         /**
          * Creates a new `ReactivePrimitive` which is dependent on the `ReactivePrimitive` it's called on, and is updated as the original one is updated. The value of the original is tranformed by a callback function whose return value determines the value of the resulting `ReactivePrimitive`.
          * @param callback A function which will be called whenever the original `ReactivePrimitive` is updated, and whose return value is assigned to the output `ReactivePrimitive`
          */
         pipe(callback) {
-            return ReactivePrimitive.from(callback, this);
+            return computed(() => callback(this.value));
         }
         truthy(valueWhenTruthy, valueWhenFalsy) {
             return this.pipe(v => v ? valueWhenTruthy : valueWhenFalsy);
@@ -524,19 +527,6 @@
             return this.pipe(v => condition(v) ? yes : no);
         }
     }
-    // const a = new ReactivePrimitive(3);
-    // const b = new ReactivePrimitive("6");
-    // const d = new ReactiveArray(["7", "8"]);
-    // const c = ReactivePrimitive.from(
-    //   (a, b, d) => a + b,
-    //   a,
-    //   b,
-    //   d
-    // );
-    // console.log(a.value, b.value, c.value); //3, 6, 9
-    // a.value++;
-    // b.value = "38";
-    // console.log(a.value, b.value, c.value); //4, 38, 42
 
     /**
      * Modifies a `PropertyDescriptor` to have its value reactive and sets it to unconfigurable.
@@ -613,57 +603,6 @@
             .map(propertyDescriptorToReactive(parent)))));
         return input;
     }
-
-    /**
-     * Makes an attempt to convert any value to a `number`. Returns `NaN` if conversion fails.
-     * @param value Value to be converted to a number
-     */
-    function toNumber(value) {
-        try {
-            return Number(value);
-        }
-        catch { // Number(Symbol()) throws, but we just want to know if it can be converted to a number
-            return NaN;
-        }
-    }
-
-    /**
-     * Configuration object for the `Proxy` created by `ReactiveArray`. The proxy is used for enabling dynamic index access using the bracket notation (ex: `arr[0] = "foo"`).
-     */
-    const reactiveArrayProxyConfig = {
-        deleteProperty(target, property) {
-            const index = toNumber(property);
-            if (!Number.isNaN(index)) {
-                target.splice(index, 1);
-                return true;
-            }
-            else {
-                return false;
-            }
-        },
-        get(target, property) {
-            const index = toNumber(property);
-            if (!Number.isNaN(index)) { // Was valid number key (i.e. array index)
-                return target.get(index);
-            }
-            else { // Was a string or symbol key
-                const value = target[property];
-                return (typeof value === "function"
-                    ? value.bind(target) // Without binding, #private fields break in Proxies
-                    : value);
-            }
-        },
-        set(target, property, value) {
-            const index = toNumber(property);
-            if (!Number.isNaN(index)) {
-                target.splice(index, 1, value);
-                return true;
-            }
-            else {
-                return false;
-            }
-        },
-    };
 
     const nonRenderedValues = new Set([
         undefined,
@@ -755,12 +694,12 @@
             const newNodes = nodes.flatMap(v => (typeof v === "string" ? new Text(v) :
                 v instanceof DocumentFragment ? [...v.childNodes] :
                     v));
-            this._brandNodes(newNodes);
+            this.#brandNodes(newNodes);
             whatToReplace.before(...newNodes);
-            void this._disposeNodes([whatToReplace]);
+            void this.#disposeNodes([whatToReplace]);
             this.#nodes.splice(location, 1, ...newNodes);
         }
-        _brandNodes(nodes) {
+        #brandNodes(nodes) {
             nodes
                 .forEach(node => node.destinySlot = this);
         }
@@ -772,12 +711,12 @@
             const fragment = input instanceof TemplateResult
                 ? input.content
                 : input;
-            void this._disposeCurrentNodes();
+            void this.#disposeCurrentNodes();
             this.#nodes = Object.values(fragment.childNodes);
-            this._brandNodes(this.#nodes);
+            this.#brandNodes(this.#nodes);
             this.#endAnchor.before(fragment);
         }
-        async _disposeNodes(nodesToDisposeOf) {
+        async #disposeNodes(nodesToDisposeOf) {
             await Promise.all(nodesToDisposeOf.map(node => deferredElements.get(node)?.(node)));
             for (const node of nodesToDisposeOf) {
                 node.remove();
@@ -786,14 +725,14 @@
         /**
          * First removes all the current nodes from this Slot's list of tracked nodes, then waits for any exit tasks (such as animations) these nodes might have, and removes each node once all the tasks have finished running.
          */
-        async _disposeCurrentNodes() {
-            await this._disposeNodes(this.#nodes.splice(0, this.#nodes.length));
+        async #disposeCurrentNodes() {
+            await this.#disposeNodes(this.#nodes.splice(0, this.#nodes.length));
         }
         /**
          * Removes all the associated content from the DOM and destroys the `Slot`. Note: this is an async function and will wait for any exit animations or other tasks to finish before removing anything. Exit tasks for HTML elements are defined by the `destiny:out` attribute; if the callback function given to it returns a `Promise`, that's what's being awaited before removal.
          */
         async remove() {
-            await this._disposeCurrentNodes();
+            await this.#disposeCurrentNodes();
             this.#startAnchor.remove();
             this.#endAnchor.remove();
         }
@@ -828,8 +767,8 @@
              * @param items Any new items to be inserted into DOM
              */
             this.update = (index, deleteCount, ...items) => {
-                this._removeFromDom(index, deleteCount);
-                this._insertToDom(index, ...items);
+                this.#removeFromDom(index, deleteCount);
+                this.#insertToDom(index, ...items);
             };
             placeholderNode.replaceWith(this.#startAnchor, this.#endAnchor);
             this.#source = source;
@@ -848,7 +787,7 @@
          * @param index Index at which to insert the items
          * @param fragments the items to be inserted
          */
-        _insertToDom(index, ...fragments) {
+        #insertToDom(index, ...fragments) {
             fragments.forEach((fragment, i) => {
                 const where = i + index;
                 const slotPlaceholder = new Comment("Destiny slot placeholder");
@@ -866,7 +805,7 @@
          * @param from Index at which to start removing `Slot`s
          * @param count How many `Slot`s to remove
          */
-        _removeFromDom(from, count) {
+        #removeFromDom(from, count) {
             const to = Math.min(from + count, this.#domArray.length);
             for (let i = from; i < to; i++) {
                 void this.#domArray[i].remove();
@@ -926,7 +865,7 @@
                 trailings: [val[0]?.groups.start ?? ""],
             });
             if (resolvedValue.items.length) {
-                attrVal = ReactivePrimitive.from((...args) => resolvedValue.trailings.reduce((a, v, i) => a + String(args[i]) + v), ...resolvedValue.items);
+                attrVal = computed(() => resolvedValue.trailings.reduce((a, v, i) => a + String(resolvedValue.items[i].value) + v));
             }
             else {
                 attrVal = resolvedValue.trailings[0];
@@ -935,27 +874,17 @@
         return attrVal;
     }
 
-    /**
-     * Converts kebab-cased text to camelCased text.
-     * @param input string to be converted
-     */
-    function kebabToCamel(input) {
-        return input.replace(/(-[a-z])/g, match => match[1].toUpperCase());
-    }
-
     const validNamespaces = ["attribute", "prop", "call", "on", "destiny"];
     function isValidNamespace(input) {
         return validNamespaces.includes(input);
     }
 
+    // import { kebabToCamel } from "../../../utils/kebabToCamel.js";
     function parseAttributeName(input) {
-        const { namespace = "attribute", attributeNameRaw, } = (/(?:(?<namespace>[a-z]+):)?(?<attributeNameRaw>.+)/
+        const { namespace = "attribute", attributeName, } = (/(?:(?<namespace>[a-z]+):)?(?<attributeName>.+)/
             .exec(input)
             ?.groups
             ?? {});
-        const attributeName = (namespace !== "attribute"
-            ? kebabToCamel(attributeNameRaw)
-            : attributeNameRaw);
         if (!isValidNamespace(namespace)) {
             throw new Error("Invalid namespace");
         }
@@ -1078,19 +1007,6 @@
         });
     }
 
-    /**
-     * An error that is thrown for features that are intended to be implemented, but are not implemented yet.
-     */
-    class NotImplementedError extends Error {
-        /**
-         * @param message Additional information about the feature or why it's not supported yet
-         */
-        constructor(message) {
-            super(message);
-            this.name = "NotImplementedError";
-        }
-    }
-
     const processUpdateQueue = (updateQueue, filteredArray) => {
         if (!updateQueue.length)
             return;
@@ -1133,25 +1049,86 @@
     };
 
     /**
+     * Makes an attempt to convert any value to a `number`. Returns `NaN` if conversion fails.
+     * @param value Value to be converted to a number
+     */
+    function toNumber(value) {
+        try {
+            return Number(value);
+        }
+        catch { // Number(Symbol()) throws, but we just want to know if it can be converted to a number
+            return NaN;
+        }
+    }
+
+    class Indexable {
+        constructor() {
+            const proxy = new Proxy(this, {
+                get(target, key, receiver) {
+                    const index = toNumber(key);
+                    if (!Number.isNaN(index)) {
+                        return receiver.get(index);
+                    }
+                    return Reflect.get(target, key, receiver);
+                },
+                set(target, key, value, receiver) {
+                    const index = toNumber(key);
+                    if (!Number.isNaN(index)) {
+                        receiver.set(index, value);
+                        return true;
+                    }
+                    return Reflect.set(target, key, value, receiver);
+                },
+                deleteProperty() {
+                    throw new TypeError("Illegal use of delete keyword");
+                },
+            });
+            return proxy;
+        }
+    }
+
+    const flatten = (input) => {
+        return input.reduce((acc, v) => {
+            v instanceof ReactiveArray
+                ? acc.push(...v.value)
+                : acc.push(v);
+            return acc;
+        }, []);
+    };
+
+    /**
      * `ReactiveArray`s are reactive values that contain multiple values which can be updated and whose updates can be listened to. In general, `ReactiveArray`s behave very similar to native `Array`s. The main difference is, that most primitive values are given as `ReactivePrimitive`s and any immutable methods will return a new readonly `ReactiveArray`, whose values are tied to the original `ReactiveArray`. The class also provides a few custom convenience methods.
      */
-    class ReactiveArray {
+    class ReactiveArray extends Indexable {
         constructor(...input) {
+            super();
             /** A Set containing all the callbacks to be called whenever the ReactiveArray is updated */
             this.#callbacks = new Set;
-            this.#value = makeNonPrimitiveItemsReactive(input, this);
-            this.#length = ReactivePrimitive.from(() => this.#value.length, this);
+            this.#__value = makeNonPrimitiveItemsReactive(input, this);
+            this.#length = computed(() => this.#value.length);
             this.#indices = input.map((_, i) => new ReactivePrimitive(i));
-            return new Proxy(this, reactiveArrayProxyConfig);
         }
         /** An Array containing the current values of the ReactiveArray */
-        #value;
+        #__value;
+        /** A getter for an Array containing the current values of the ReactiveArray. Notifies computed values when it's being accessed. */
+        get #value() {
+            if (computeFunction.current) {
+                this.#callbacks.add(computeFunction.current);
+            }
+            return this.#__value;
+        }
         /** An Array containing ReactivePrimitives for each index of the ReactiveArray */
         #indices;
         /** A Set containing all the callbacks to be called whenever the ReactiveArray is updated */
         #callbacks;
         /** Size of the ReactiveArray as a ReactivePrimitive */
         #length;
+        /**
+         * When the object is attempted to be serialized using JSON.serialize(), the current value of `this.value` is returned.
+         */
+        toJSON() {
+            return this.value;
+        }
         /**
          * Iterates over the values of the array, similar to how regular Arrays can be iterated over.
          */
@@ -1163,13 +1140,13 @@
          */
         async *[Symbol.asyncIterator]() {
             while (true) {
-                yield await this._nextUpdate();
+                yield await this.#nextUpdate();
             }
         }
         /**
          * Returns a promise that resolves when the next update fires, with the values the event fired with.
          */
-        _nextUpdate() {
+        #nextUpdate() {
             return new Promise(resolve => {
                 const cb = (...props) => {
                     resolve(props);
@@ -1190,17 +1167,17 @@
         get value() {
             return this.#value.slice(0);
         }
-        // This is not a setter because TS doesn't like setters and getters having different values. The input array is turned reactive recursively.
         /**
          * Replaces all the current values of the array with values of the provided array.
+         *
          * @param items array of items to replace the current ones with.
          */
-        setValue(items) {
+        set value(items) {
             this.splice(0, this.#value.length, ...items);
-            return this;
         }
         /**
          * An alternative to using backet syntax `arr[index]` to access values. Bracket notation requires the Proxy, which slows down propety accesses, while this doesn't.
+         *
          * @param index index at which you want to access a value
          */
         get(index) {
@@ -1211,17 +1188,18 @@
         }
         /**
          * An alternative to using backet syntax `arr[index] = value` to set values. Bracket notation requires the Proxy, which slows down propety accesses, while this doesn't.
+         *
          * @param index index at which you want to set a value
          * @param value value you want to set at the specified index
          */
         set(index, value) {
             this.splice(index, 1, value);
-            return value;
+            return this;
         }
         /**
          * Returns the arguments that a full, forced, update would for a callback. I.E. first item in the array is the index (`0`), second argument is delte count (current array length), and 3...n are the items currently in the array.
          */
-        _argsForFullUpdate() {
+        #argsForFullUpdate() {
             return [0, this.#value.length, ...this.#value];
         }
         /**
@@ -1230,7 +1208,7 @@
          * @param callback The function to be called when the array is updated. It's called with `(startIndex, deleteCount, ...addedItems)`.
          */
         pipe(callback) {
-            const ref = new ReactivePrimitive(callback(...this._argsForFullUpdate()));
+            const ref = new ReactivePrimitive(callback(...this.#argsForFullUpdate()));
             this.bind((...args) => {
                 ref.value = callback(...args);
             }, true);
@@ -1238,6 +1216,7 @@
         }
         /**
          * Adds a listener to the array, which is called when the array is modified in some capacity.
+         *
          * @param callback The function to be called when the array is updated. It's called with `(startIndex, deleteCount, ...addedItems)`.
          * @param noFirstRun Default: false. Determines whether the callback function should be called once when the listener is first added.
          */
@@ -1250,6 +1229,7 @@
         }
         /**
          * Removes a listener that was added using `ReactiveArray::bind()`.
+         *
          * @param callback The callback function to be unbound (removed from the array's update callbacks). Similar to EventListeners, it needs to be a reference to the same callaback function that was previously added.
          */
         unbind(callback) {
@@ -1306,6 +1286,7 @@
         }
         /**
          * Works just like `Array::copyWithin()`. Returns the this object after shallow-copying a section of the array identified by start and end to the same array starting at position target
+         *
          * @param target Index where to start copying to. If target is negative, it is treated as length+target where length is the length of the array.
          * @param start Where to start copying from. If start is negative, it is treated as length+start. Default: `0`.
          * @param end Where to stop copying from. If end is negative, it is treated as length+end. Default: `this.length.value`
@@ -1321,7 +1302,7 @@
         }
         /**
          * Works similar to `Array::fill()`, except inserted values are made recursively reactive. The section identified by start and end is filled with `value`. **Note** that inserted object values are not cloned, which may cause unintended behavior.
-      
+         *
          * @param value  value to fill array section with
          * @param start  index to start filling the array at. If start is negative, it is treated as length+start where length is the length of the array.
          * @param end    index to stop filling the array at. If end is negative, it is treated as length+end.
@@ -1398,7 +1379,7 @@
          * Works just like `Array::reverse()`. Reverses the elements of the array in place.
          */
         reverse() {
-            this.setValue(this.#value.reverse());
+            this.value = this.#value.reverse();
             return this;
         }
         /**
@@ -1413,11 +1394,12 @@
          * @param compareFn  Specifies a function that defines the sort order. It is expected to return a negative value if first argument is less than second argument, zero if they're equal and a positive value otherwise. If omitted, the array elements are converted to strings, then sorted according to each character's Unicode code point value.
          */
         sort(compareFn) {
-            this.setValue(this.#value.sort(compareFn));
+            this.value = this.#value.sort(compareFn);
             return this;
         }
         /**
          * Similar to `Array::splice()`. Added items are implicitly made recursively reactive.
+         *
          * @param start        Where to start modifying the array
          * @param deleteCount  How many items to remove
          * @param items        Items to add to the array
@@ -1426,26 +1408,25 @@
             if (start > this.#value.length) {
                 throw new RangeError(`Out of bounds assignment: tried to assign to index ${start}, but array length was only ${this.#value.length}. Sparse arrays are not allowed. Consider using .push() instead.`);
             }
-            this._adjustIndices(start, deleteCount, items);
+            this.#adjustIndices(start, deleteCount, items);
             const reactiveItems = makeNonPrimitiveItemsReactive(items, this);
             const deletedItems = this.#value.splice(start, deleteCount, ...reactiveItems);
-            this._dispatchUpdateEvents(start, deleteCount, reactiveItems);
+            this.#dispatchUpdateEvents(start, deleteCount, reactiveItems);
             return deletedItems;
         }
-        _dispatchUpdateEvents(start, deleteCount, newItems = []) {
+        #dispatchUpdateEvents(start, deleteCount, newItems = []) {
             for (const callback of this.#callbacks) {
-                queueMicrotask(() => {
-                    callback(start, deleteCount, ...newItems);
-                });
+                callback(start, deleteCount, ...newItems);
             }
         }
         /**
          * Updates the indices of each item whose index changed due to the update. Indices of removed items will become `-1`. Also inserts in new indices as `ReactivePrimitive<number>` for any added items.
+         *
          * @param start Index at which the ReactiveArray started changing
          * @param deleteCount How many items were deleted
          * @param items Items that were added
          */
-        _adjustIndices(start, deleteCount, items) {
+        #adjustIndices(start, deleteCount, items) {
             const shiftedBy = items.length - deleteCount;
             if (shiftedBy) {
                 for (let i = start + deleteCount; i < this.#indices.length; i++) {
@@ -1461,7 +1442,7 @@
          * Force the the array to dispatch events to its callback. The event will simply say `0` items were removed at index `0`, with `0` items added. No equivalent on native Array prototype.
          */
         update() {
-            this._dispatchUpdateEvents(0, 0);
+            this.#dispatchUpdateEvents(0, 0);
             return this;
         }
         /**
@@ -1484,6 +1465,9 @@
                 dependency.bind(() => updateFilteredArray(callback, this.#value, filteredArray, maskArray), true);
             });
             this.bind((start, deletes, ...items) => {
+                if (deletes === 0 && items.length === 0) {
+                    updateFilteredArray(callback, this.#value, filteredArray, maskArray);
+                }
                 const lastInMask = maskArray.slice(0, start).reverse().find(v => v.show);
                 const newItems = [];
                 let currentIndex = (lastInMask?.index ?? -1);
@@ -1518,35 +1502,26 @@
             });
             return filteredArray;
         }
-        // TODO
-        flat(
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars-experimental
-        depth = 1) {
-            throw new NotImplementedError("See https://github.com/0kku/destiny/issues/1");
-            // const newArr = new ReactiveArray(
-            //   ...this.#value.flat(depth),
-            // );
-            // this.#callbacks.add(
-            //   () => newArr.setValue(
-            //     this.#value.flat(depth),
-            //   ),
-            // );
-            // return newArr;
+        /**
+         * Similar to `Array::flat()`, except that it does **not** accept a depth parameter, and it returns a readonly ReactiveArray which gets gets updated with new values as the originating array is updated.
+         *
+         * ! This metod does not optimize changes. When source canges in any way, it recomputes every value, even when it theoretically wouldn't need to.
+         */
+        flat() {
+            const newArr = new ReactiveArray(...flatten(this.#value));
+            this.bind(() => newArr.value = flatten(this.#value), false);
+            return newArr;
         }
-        // TODO
-        flatMap(
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars-experimental
-        callback) {
-            throw new NotImplementedError("See https://github.com/0kku/destiny/issues/1");
-            // const newArr = new ReactiveArray(
-            //   ...this.#value.flatMap(callback)
-            // );
-            // this.pipe(() => {
-            //   newArr.setValue(
-            //     this.#value.flatMap(callback),
-            //   );
-            // });
-            // return newArr;
+        /**
+         * Similar to `Array::flatMap()`, except that it returns a readonly ReactiveArray, which gets gets updated with new values as the originating array is updated. If you don't want this behavior, use `ReactiveArray.prototype.value.flatMap()` instead.
+         *
+         * ! This metod does not optimize changes. When source canges in any way, it recomputes every value, even when it theoretically wouldn't need to.
+         */
+        flatMap(callback) {
+            const flatMap = () => flatten(this.value.flatMap(callback));
+            const newArr = new ReactiveArray(...flatMap());
+            this.bind(() => newArr.value = flatMap(), false);
+            return newArr;
         }
         /**
          * Similar to `Array::map()`, except that it returns a readonly ReactiveArray, which gets gets updated with mapped values as the originating array is updated. If you don't want this behavior, use `ReactiveArray.prototype.value.map()` instead.
@@ -1736,14 +1711,9 @@
     const xmlRoot = xmlDocument.querySelector("xml");
     xmlRange.setStart(xmlRoot, 0);
     xmlRange.setEnd(xmlRoot, 0);
-    function parseString(string, parser) {
+    function parseString(string) {
         const templateElement = document.createElement("template");
-        if (parser === "html") {
-            templateElement.innerHTML = string;
-        }
-        else {
-            templateElement.content.append(xmlRange.createContextualFragment(string));
-        }
+        templateElement.content.append(xmlRange.createContextualFragment(string));
         return templateElement;
     }
 
@@ -1817,13 +1787,13 @@
         prepareContentSlots(contentSlots);
     }
 
-    function isDestinyElement(input) {
+    function isComponent(input) {
         return (Boolean(input) &&
             typeof input === "function" &&
-            Object.prototype.isPrototypeOf.call(DestinyElement, input));
+            Object.prototype.isPrototypeOf.call(Component, input));
     }
 
-    class DestinyFallback extends DestinyElement {
+    class DestinyFallback extends Component {
         constructor() {
             super();
             this.forwardProps = new Ref();
@@ -1833,7 +1803,7 @@
             queueMicrotask(async () => {
                 const module = await this.assignedData.prop.get("for");
                 const component = Object.values(module).shift();
-                if (!component || !isDestinyElement(component)) {
+                if (!component || !isComponent(component)) {
                     throw new Error(`Invalid component constructor ${String(component)}`);
                 }
                 this.replaceWith(xml `
@@ -1851,14 +1821,14 @@
      * Parses and processes a `TemplateStringsArray` into a `DocumentFragment`.
      * @param param0 The template strings to parse and process
      */
-    function createTemplate([first, ...strings], props, parser) {
+    function createTemplate([first, ...strings], props) {
         let string = first;
         const tagProps = new Map();
         for (const [i, fragment] of strings.entries()) {
             const prop = props[i];
             if (string.endsWith("<")) {
                 tagProps.set(i, prop);
-                if (isDestinyElement(prop) && prop.captureProps) {
+                if (isComponent(prop) && prop.captureProps) {
                     string += `${prop.register()} data-capture-props="true"${fragment}`;
                 }
                 else if (prop instanceof Promise) {
@@ -1881,41 +1851,40 @@
                 string += `__internal_${i}_${fragment}`;
             }
         }
-        const templateElement = parseString(string, parser);
+        const templateElement = parseString(string);
         resolveSlots(templateElement);
         return [templateElement, tagProps];
     }
 
     /** Used to cache parsed `DocumentFragment`s so looped templates don't need to be reparsed on each iteration. */
-    const templateCache = new WeakMap();
-    function getFromCache(key, set, props) {
-        const template = templateCache.get(key);
-        if (!template) {
-            const newTemplate = set();
-            templateCache.set(key, newTemplate);
-            return newTemplate[0];
-        }
-        else {
-            // Check if any of the tags differ from the cache, because they can't be slotted
-            for (const [k, v] of template[1]) {
-                if (props[k] !== v)
-                    return set()[0];
+    class TemplateCache extends WeakMap {
+        computeIfAbsent(key, set, props) {
+            const template = this.get(key);
+            if (!template) {
+                const newTemplate = set();
+                this.set(key, newTemplate);
+                return newTemplate[0];
             }
-            return template[0];
+            else {
+                // Check if any of the tags differ from the cache, because they can't be slotted
+                for (const [k, v] of template[1]) {
+                    if (props[k] !== v)
+                        return set()[0];
+                }
+                return template[0];
+            }
         }
-    }
-    function parser(strings, props, parser) {
-        const template = getFromCache(strings, () => createTemplate(strings, props, parser), props);
-        return new TemplateResult(template, props);
     }
 
+    const templateCache = new TemplateCache;
     /**
      * Parses an XML template into a `TemplateResult` and hooks up reactivity logic to keep the view synchronized with the state of the reactive items prived in the slots.
      * @param strings The straing parts of the template
      * @param props The slotted values in the template
      */
     function xml(strings, ...props) {
-        return parser(strings, props, "xml");
+        const template = templateCache.computeIfAbsent(strings, () => createTemplate(strings, props), props);
+        return new TemplateResult(template, props);
     }
 
     // these aren't really private, but nor are they really useful to document
@@ -3179,7 +3148,7 @@
       }
     }
 
-    let singleton = null;
+    let singleton$1 = null;
 
     /**
      * Represents the local zone for this JavaScript environment.
@@ -3191,10 +3160,10 @@
        * @return {LocalZone}
        */
       static get instance() {
-        if (singleton === null) {
-          singleton = new LocalZone();
+        if (singleton$1 === null) {
+          singleton$1 = new LocalZone();
         }
-        return singleton;
+        return singleton$1;
       }
 
       /** @override **/
@@ -3426,7 +3395,7 @@
       }
     }
 
-    let singleton$1 = null;
+    let singleton = null;
 
     /**
      * A zone with a fixed offset (meaning no DST)
@@ -3438,10 +3407,10 @@
        * @return {FixedOffsetZone}
        */
       static get utcInstance() {
-        if (singleton$1 === null) {
-          singleton$1 = new FixedOffsetZone(0);
+        if (singleton === null) {
+          singleton = new FixedOffsetZone(0);
         }
-        return singleton$1;
+        return singleton;
       }
 
       /**
@@ -4522,7 +4491,7 @@
       );
     }
 
-    const INVALID = "Invalid Duration";
+    const INVALID$2 = "Invalid Duration";
 
     // unit conversion constants
     const lowOrderMatrix = {
@@ -4611,7 +4580,7 @@
       );
 
     // units ordered by size
-    const orderedUnits = [
+    const orderedUnits$1 = [
       "years",
       "quarters",
       "months",
@@ -4623,10 +4592,10 @@
       "milliseconds"
     ];
 
-    const reverseUnits = orderedUnits.slice(0).reverse();
+    const reverseUnits = orderedUnits$1.slice(0).reverse();
 
     // clone really means "create another instance just like this one, but with these changes"
-    function clone(dur, alts, clear = false) {
+    function clone$1(dur, alts, clear = false) {
       // deep merge for vals
       const conf = {
         values: clear ? alts.values : Object.assign({}, dur.values, alts.values || {}),
@@ -4913,7 +4882,7 @@
         });
         return this.isValid
           ? Formatter.create(this.loc, fmtOpts).formatDurationFromString(this, fmt)
-          : INVALID;
+          : INVALID$2;
       }
 
       /**
@@ -5062,13 +5031,13 @@
         const dur = friendlyDuration(duration),
           result = {};
 
-        for (const k of orderedUnits) {
+        for (const k of orderedUnits$1) {
           if (hasOwnProperty(dur.values, k) || hasOwnProperty(this.values, k)) {
             result[k] = dur.get(k) + this.get(k);
           }
         }
 
-        return clone(this, { values: result }, true);
+        return clone$1(this, { values: result }, true);
       }
 
       /**
@@ -5096,7 +5065,7 @@
         for (const k of Object.keys(this.values)) {
           result[k] = asNumber(fn(this.values[k], k));
         }
-        return clone(this, { values: result }, true);
+        return clone$1(this, { values: result }, true);
       }
 
       /**
@@ -5122,7 +5091,7 @@
         if (!this.isValid) return this;
 
         const mixed = Object.assign(this.values, normalizeObject(values, Duration.normalizeUnit, []));
-        return clone(this, { values: mixed });
+        return clone$1(this, { values: mixed });
       }
 
       /**
@@ -5138,7 +5107,7 @@
           opts.conversionAccuracy = conversionAccuracy;
         }
 
-        return clone(this, opts);
+        return clone$1(this, opts);
       }
 
       /**
@@ -5163,7 +5132,7 @@
         if (!this.isValid) return this;
         const vals = this.toObject();
         normalizeValues(this.matrix, vals);
-        return clone(this, { values: vals }, true);
+        return clone$1(this, { values: vals }, true);
       }
 
       /**
@@ -5185,7 +5154,7 @@
           vals = this.toObject();
         let lastUnit;
 
-        for (const k of orderedUnits) {
+        for (const k of orderedUnits$1) {
           if (units.indexOf(k) >= 0) {
             lastUnit = k;
 
@@ -5208,7 +5177,7 @@
 
             // plus anything further down the chain that should be rolled up in to this
             for (const down in vals) {
-              if (orderedUnits.indexOf(down) > orderedUnits.indexOf(k)) {
+              if (orderedUnits$1.indexOf(down) > orderedUnits$1.indexOf(k)) {
                 convert(this.matrix, vals, down, built, k);
               }
             }
@@ -5227,7 +5196,7 @@
           }
         }
 
-        return clone(this, { values: built }, true).normalize();
+        return clone$1(this, { values: built }, true).normalize();
       }
 
       /**
@@ -5241,7 +5210,7 @@
         for (const k of Object.keys(this.values)) {
           negated[k] = -this.values[k];
         }
-        return clone(this, { values: negated }, true);
+        return clone$1(this, { values: negated }, true);
       }
 
       /**
@@ -5362,7 +5331,7 @@
           return v1 === v2;
         }
 
-        for (const u of orderedUnits) {
+        for (const u of orderedUnits$1) {
           if (!eq(this.values[u], other.values[u])) {
             return false;
           }
@@ -6883,7 +6852,7 @@
       } else return false;
     }
 
-    const INVALID$2 = "Invalid DateTime";
+    const INVALID = "Invalid DateTime";
     const MAX_DATE = 8.64e15;
 
     function unsupportedZone(zone) {
@@ -6900,7 +6869,7 @@
 
     // clone really means, "make a new object with these modifications". all "setters" really use this
     // to create a new object while only changing some of the properties
-    function clone$1(inst, alts) {
+    function clone(inst, alts) {
       const current = {
         ts: inst.ts,
         zone: inst.zone,
@@ -7098,7 +7067,7 @@
       };
 
     // Units in the supported calendars, sorted by bigness
-    const orderedUnits$1 = ["year", "month", "day", "hour", "minute", "second", "millisecond"],
+    const orderedUnits = ["year", "month", "day", "hour", "minute", "second", "millisecond"],
       orderedWeekUnits = [
         "weekYear",
         "weekNumber",
@@ -7149,7 +7118,7 @@
     // are present, and so on.
     function quickDT(obj, zone) {
       // assume we have the higher-order units
-      for (const u of orderedUnits$1) {
+      for (const u of orderedUnits) {
         if (isUndefined(obj[u])) {
           obj[u] = defaultUnitValues[u];
         }
@@ -7531,7 +7500,7 @@
           defaultValues = defaultOrdinalUnitValues;
           objNow = gregorianToOrdinal(objNow);
         } else {
-          units = orderedUnits$1;
+          units = orderedUnits;
           defaultValues = defaultUnitValues;
         }
 
@@ -8138,7 +8107,7 @@
             const asObj = this.toObject();
             [newTS] = objToTS(asObj, offsetGuess, zone);
           }
-          return clone$1(this, { ts: newTS, zone });
+          return clone(this, { ts: newTS, zone });
         }
       }
 
@@ -8150,7 +8119,7 @@
        */
       reconfigure({ locale, numberingSystem, outputCalendar } = {}) {
         const loc = this.loc.clone({ locale, numberingSystem, outputCalendar });
-        return clone$1(this, { loc });
+        return clone(this, { loc });
       }
 
       /**
@@ -8198,7 +8167,7 @@
         }
 
         const [ts, o] = objToTS(mixed, this.o, this.zone);
-        return clone$1(this, { ts, o });
+        return clone(this, { ts, o });
       }
 
       /**
@@ -8217,7 +8186,7 @@
       plus(duration) {
         if (!this.isValid) return this;
         const dur = friendlyDuration(duration);
-        return clone$1(this, adjustTime(this, dur));
+        return clone(this, adjustTime(this, dur));
       }
 
       /**
@@ -8229,7 +8198,7 @@
       minus(duration) {
         if (!this.isValid) return this;
         const dur = friendlyDuration(duration).negate();
-        return clone$1(this, adjustTime(this, dur));
+        return clone(this, adjustTime(this, dur));
       }
 
       /**
@@ -8318,7 +8287,7 @@
       toFormat(fmt, opts = {}) {
         return this.isValid
           ? Formatter.create(this.loc.redefaultToEN(opts)).formatDateTimeFromString(this, fmt)
-          : INVALID$2;
+          : INVALID;
       }
 
       /**
@@ -8342,7 +8311,7 @@
       toLocaleString(opts = DATE_SHORT) {
         return this.isValid
           ? Formatter.create(this.loc.clone(opts), opts).formatDateTime(this)
-          : INVALID$2;
+          : INVALID;
       }
 
       /**
@@ -8515,7 +8484,7 @@
        * @return {string}
        */
       toString() {
-        return this.isValid ? this.toISO() : INVALID$2;
+        return this.isValid ? this.toISO() : INVALID;
       }
 
       /**
@@ -9006,8 +8975,8 @@
         return newState;
     }
 
-    const isNoClock = reactive(isNoClockInWeek());
-    class ReminderUi extends DestinyElement {
+    const isNoClock$1 = reactive(isNoClockInWeek());
+    class ReminderUi extends Component {
         constructor() {
             super(...arguments);
             this.template = xml `
@@ -9078,8 +9047,8 @@
 
     <main>
         <div class="control">
-          <button on:click="${() => (isNoClock.value = toggleWeek())}">
-            ${isNoClock.pipe(bool => bool ? "Disable" : "Enable")} reminder for this week
+          <button on:click="${() => (isNoClock$1.value = toggleWeek())}">
+            ${isNoClock$1.pipe(bool => bool ? "Disable" : "Enable")} reminder for this week
           </button>
           <p style="text-align: center;">
             <em>Don't you dare screw up this time</em>
@@ -9091,8 +9060,9 @@
     }
     register(ReminderUi);
 
-    const isNoClock$1 = reactive(false);
-    class OverlayUi extends DestinyElement {
+    const isNoClock = reactive(false);
+    const inChildFrame = reactive(true);
+    class OverlayUi extends Component {
         constructor() {
             super(...arguments);
             this.template = xml `
@@ -9132,15 +9102,18 @@
       }
 
       h1 {
-        font-size: 20px;
         text-align: center;
+      }
+
+      div.reminder-screen.small-text h1 {
+        font-size: 20px;
       }
     </style>
 
     <main>
-      ${isNoClock$1.pipe(bool => bool
+      ${isNoClock.pipe(bool => bool
             ? xml `
-          <div class="reminder-screen">
+          <div class="${computed(() => "reminder-screen " + (inChildFrame.value ? "small-text" : ""))}">
             <h1>You're not supposed to be clocking in!</h1>
           </div>
         `
@@ -9156,7 +9129,7 @@
         addEventListener("message", (evt) => {
             const { orgAzuga } = evt.data ?? {};
             if (orgAzuga) {
-                onChange(orgAzuga.isNoClock);
+                onChange(orgAzuga.isNoClock, orgAzuga.inChildFrame);
             }
         });
         // Register with parent frame
@@ -9165,43 +9138,49 @@
         };
         parent.postMessage(registerMsg, hostname);
     }
-    function newChangeMessage(isNoClock) {
+    function newChangeMessage(isNoClock, inChildFrame) {
         return {
-            orgAzuga: { isNoClock },
+            orgAzuga: {
+                isNoClock,
+                inChildFrame,
+            },
         };
     }
     function parentFrame(onChildRegistered) {
         let childWindow;
+        let inChildFrame;
         addEventListener("message", (evt) => {
             const { orgAzuga } = evt.data ?? {};
             if (orgAzuga?.register) {
                 const { frame, isNoClockInitial } = onChildRegistered();
-                childWindow = frame.contentWindow;
-                childWindow?.postMessage(newChangeMessage(isNoClockInitial), hostname);
+                childWindow = frame?.contentWindow ?? window;
+                inChildFrame = childWindow !== window;
+                childWindow?.postMessage(newChangeMessage(isNoClockInitial, inChildFrame), hostname);
             }
         });
         return (isNoClock) => {
-            childWindow?.postMessage(newChangeMessage(isNoClock), hostname);
+            childWindow?.postMessage(newChangeMessage(isNoClock, inChildFrame), hostname);
         };
     }
 
     addEventListener("DOMContentLoaded", () => {
         const isTimePunchFrame = !!document.getElementById("TL_RPT_TIME_FLU");
-        const isDashboard = !!document.getElementById("PT_FLDASHBOARD");
+        const isDashboardOrPunchPage = !!(document.getElementById("PT_FLDASHBOARD") ?? document.querySelector('form#TL_RPT_TIME_FLU[name="win0"]'));
         if (isTimePunchFrame) {
             document.body.appendChild(document.createElement("overlay-ui"));
-            iframe((isNoClock) => {
-                isNoClock$1.set(isNoClock);
+            iframe((isNoClock$1, isInChildFrame) => {
+                isNoClock.set(isNoClock$1);
+                inChildFrame.set(isInChildFrame);
             });
         }
-        if (isDashboard) {
+        if (isDashboardOrPunchPage) {
             document.body.appendChild(document.createElement("reminder-ui"));
             const updateChild = parentFrame(() => ({
                 frame: document.querySelector('iframe[title="Report Time"]'),
-                isNoClockInitial: isNoClock.value,
+                isNoClockInitial: isNoClock$1.value,
             }));
             // Update child frame when stuff change
-            isNoClock.bind((isNoClock) => {
+            isNoClock$1.bind((isNoClock) => {
                 updateChild(isNoClock);
             });
         }

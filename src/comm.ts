@@ -1,7 +1,8 @@
-export type OnChangeCallback = (isNoClock: boolean) => void;
+export type OnChangeCallback = (isNoClock: boolean, inChildFrame: boolean) => void;
 export type ChangeMessage = {
   orgAzuga?: {
     isNoClock: boolean;
+    inChildFrame: boolean;
   };
 };
 export type RegisterMessage = {
@@ -18,7 +19,7 @@ export function iframe(
   addEventListener("message", (evt) => {
     const { orgAzuga }: ChangeMessage = evt.data ?? {};
     if (orgAzuga) {
-      onChange(orgAzuga.isNoClock);
+      onChange(orgAzuga.isNoClock, orgAzuga.inChildFrame);
     }
   });
 
@@ -30,9 +31,12 @@ export function iframe(
   parent.postMessage(registerMsg, hostname);
 }
 
-function newChangeMessage(isNoClock: boolean): ChangeMessage {
+function newChangeMessage(isNoClock: boolean, inChildFrame: boolean): ChangeMessage {
   return {
-    orgAzuga: { isNoClock },
+    orgAzuga: {
+      isNoClock,
+      inChildFrame,
+    },
   };
 }
 
@@ -40,18 +44,20 @@ export function parentFrame(
   onChildRegistered: () => { frame: HTMLIFrameElement, isNoClockInitial: boolean, },
 ) {
   let childWindow: Window | undefined;
+  let inChildFrame: boolean;
   addEventListener("message", (evt) => {
     const { orgAzuga }: RegisterMessage = evt.data ?? {};
 
     if (orgAzuga?.register) {
       const { frame, isNoClockInitial } = onChildRegistered();
-      childWindow = frame.contentWindow!;
-      childWindow?.postMessage(newChangeMessage(isNoClockInitial), hostname);
+      childWindow = frame?.contentWindow ?? window;
+      inChildFrame = childWindow !== window;
+      childWindow?.postMessage(newChangeMessage(isNoClockInitial, inChildFrame), hostname);
     }
   });
 
   return (isNoClock: boolean) => {
-    childWindow?.postMessage(newChangeMessage(isNoClock), hostname);
+    childWindow?.postMessage(newChangeMessage(isNoClock, inChildFrame), hostname);
   };
 }
 
